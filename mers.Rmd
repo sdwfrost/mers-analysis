@@ -1,0 +1,270 @@
+---
+title: "MERS-CoV Analysis"
+author: "Simon Frost"
+date: "6 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+messages <- file("messages.Rout", open = "wt")
+sink(messages, type = "message")
+```
+
+We are going to use a dataset of MERS-CoV analysed by Dudas et al. - the link is [here](https://www.biorxiv.org/content/early/2017/08/10/173211). I encourage you to read the paper. We will try to replicate some of the results today.
+
+## Load libraries
+
+We will need many libraries to fit these data. As a shortcut to install many of them you can run the following - this assumes you already have the library `devtools` installed.
+
+```{r,eval=FALSE}
+devtools::install_github("sdwfrost/mevr")
+```
+
+```{r}
+library(ape) # reads in trees
+library(magrittr) # adds 'pipe' operator
+library(lubridate) # manipulates dates
+library(treedater) # makes clock trees
+library(skyspline) # infers population size
+library(phydynR) # fits complex population models
+library(diversitree) # fits 'mugration' models
+library(phyland) # fits island models
+library(adephylo) # provides distances to root
+# the following need to be installed separately
+# use setRepositories(ind=c(1,2)); install.packages(c("ggplot2","ggtree"))
+library(ggplot2) # plotting
+library(ggtree) # plotting phylogenies
+```
+
+## Read tree
+
+I have already generated a maximum likelihood tree for you, from a trimmed alignment that just covers the coding region of MERS.
+
+```{r}
+treefile <- "MERS_CoV_274_CDS_renamed.treefile"
+seqlen <- 29364
+tre <- unroot(read.tree(treefile))
+tipnames <- tre$tip.label
+```
+
+Check the tree has been read in properly.
+
+```{r}
+tre
+```
+
+## Get sampling dates
+
+```{r}
+tipnames %>% strsplit(.,"_") %>% lapply(.,tail,1) %>% unlist -> tipdates
+```
+
+```{r}
+tipdates
+```
+
+We can now look at the accuracy of the dates by the number of characters in the date.
+
+```{r}
+datelength <- nchar(tipdates)
+table(datelength)
+```
+
+This tells us we have 79 taxa with only year and month.
+
+For now, we will simply impute this as day 15 of the month.
+
+```{r}
+tipdates2 <- tipdates
+tipdates2[datelength==7] <- paste(tipdates[datelength==7],"-15",sep="")
+```
+
+For the computer to understand what to do with these dates, we need to convert them to decimal fractions of a year.
+
+```{r}
+decdates <- decimal_date(as.Date(tipdates2))
+```
+
+So that we know which sequence has which date, we also name these dates.
+
+```{r}
+names(decdates) <- tipnames
+```
+
+The command `head` gives us the first few entries, and everything seems to look OK.
+
+```{r}
+head(decdates)
+```
+
+## Root to tip regression
+
+We can use R to perform root-to-tip regression too.
+
+```{r}
+tre.rtt <- rtt(tre,decdates)
+```
+
+To make the regression plot, we need to calculate the root to tip distances.
+
+```{r}
+tree.rd <- distRoot(tre.rtt)
+```
+
+The tip labels of the rooted tree are not in the same order as our original tree, so we have to match up the tip labels of the tree with the dates.
+
+```{r}
+tree.td <- decdates[match(tre.rtt$tip.label,names(decdates))]
+```
+
+```{r}
+rdtd <- data.frame(RootDistance=tree.rd,SamplingTime=tree.td)
+ggplot(rdtd,aes(x=SamplingTime,y=RootDistance))+geom_point(color="blue",alpha=0.5)+geom_smooth(method="lm",se=FALSE,fullrange=TRUE,color="red")+scale_x_continuous(limits=c(2010,2016))+theme(legend.position = "none")
+```
+
+
+## Using treedater
+
+Using treedater is very straightforward.
+
+```{r}
+tre.dated <- dater(tre, decdates, s=seqlen, maxit = 100, minblen=1./365, abstol = .001, quiet = TRUE, temporalConstraints=TRUE, numStart=2, searchRoot=2, strictClock=FALSE, ncpu=1)
+```
+
+We can print out the time of the most recent common ancestor.
+
+```{r}
+date_decimal(tre.dated$timeOfMRCA)
+```
+
+We can now look at the new tree with tip dates on it.
+
+```{r}
+tre2 <- tre.dated
+class(tre2) <- "phylo"
+g <- ggtree(tre2,mrsd=date_decimal(max(decdates)))+theme_tree2()
+```
+
+```{r}
+g
+```
+
+## Changes in effective population size in camels
+
+It doesn't make much sense to look at a single 'population size' when we have a mixture of sequences from humans and camels. So, we will look just at camels. To do this, we will prune the tree down to just camels using 'drop.tip'.
+
+```{r}
+tre.dated.camel <- drop.tip(tre2,grep("human",tre2$tip.label))
+tre.dated.camel <- DatedTree(tre.dated.camel, decdates[grep("camel",names(decdates))], tol = 1/365)
+```
+
+
+```{r}
+t0 <- tre.dated.camel$maxSampleTime - tre.dated.camel$maxHeight
+tre.dated.camel.sky <- fit.skyspline.ml(tre.dated.camel, death_rate_guess = 1/(10/365), t0=t0, y0_guess=1,  R0guess = 2, np_range = 2)
+```
+
+```{r}
+camel.popsize <- tre.dated.camel.sky$demo.history
+```
+
+```{r}
+ggplot(camel.popsize,aes(x=times,y=pop.size))+geom_line()
+```
+
+Try changing the assumption about the infectious period in camels.
+
+## Transmission between camels and humans
+
+### Plotting the tree
+
+We can colour the tree in by host type.
+
+```{r}
+host <- rep("camel",length(tre2$tip.label))
+host[grep("human",tre2$tip.label)] <- "human"
+dd <- data.frame(taxa=tre2$tip.label,host=host)
+g2 <- g %<+% dd
+g2+geom_tippoint(aes(shape=host, color=host), alpha=0.25)+theme(legend.position="right")
+```
+
+```{r}
+groups <- split(tre2$tip.label,host)
+tre3 <- groupOTU(tre2,groups)
+g3 <- ggtree(tre3,aes(color=group),mrsd=date_decimal(max(decdates)))+theme_tree2()+theme(legend.position="right")
+g3
+```
+
+### Migration rates the WRONG way
+
+```{r}
+states <- as.integer(grepl("human",host))
+names(states) <- tre2$tip.label
+head(states)
+```
+
+```{r}
+check.tree <- function (tree, ultrametric = TRUE, bifurcating = TRUE, node.labels = FALSE) 
+{
+    if (!inherits(tree, "phylo")) 
+        stop("'tree' must be a valid phylo tree")
+    #if (ultrametric && !is.ultrametric(tree)) 
+    #    stop("'tree' must be ultrametric")
+    if (any(tree$edge.length < 0)) 
+        stop("Negative branch lengths in tree")
+    if (bifurcating && (!is.binary.tree(tree) || any(tabulate(tree$edge[, 
+        1]) == 1))) 
+        stop("'tree must be bifurcating (no polytomies or unbranched nodes)'")
+    if (any(duplicated(tree$tip.label))) 
+        stop("Tree contains duplicated tip labels")
+    if (node.labels) {
+        if (is.null(tree$node.label)) 
+            tree$node.label <- sprintf("nd%d", seq_len(tree$Nnode))
+        else if (any(duplicated(tree$node.label))) 
+            stop("Tree contains duplicated node labels")
+    }
+    tree
+}
+assignInNamespace("check.tree",check.tree,"diversitree")
+```
+
+The following gives the rates of 'mugration':
+
+- q01: camels to humans
+- q10: humans to camels
+
+```{r}
+tre.mk2 <- make.mk2(tre2,states)
+tre.mk2.fit <- find.mle(tre.mk2,c(0.1,0.1),root=ROOT.FLAT)
+tre.mk2.fit$par
+```
+
+This might suggest that the rate of human to camel transmission is roughly the same as the rate from camel to human!
+
+The following gives the probability of the root state being either in a camel or a human.
+
+```{r}
+mk2.root <- t(asr.marginal(tre.mk2,tre.mk2.fit$par))[1,]
+names(mk2.root) <- c("camel","human")
+mk2.root
+```
+
+This is counter to our biological intuition, where we believe camels are the reservoir. Why is the model getting 'tricked'?
+
+### Migration rates the correct way
+
+```{r}
+fit <- phylandml(tre2, delimiter=NULL, regex="camel|human",quiet=TRUE)
+```
+
+```{r}
+fit
+```
+
+The following incantation works out the probability of the root being in a camel or human.
+
+```{r}
+fit$ace[which.max(node.depth(fit$bdt )),]
+```
+
