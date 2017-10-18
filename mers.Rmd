@@ -29,7 +29,7 @@ library(treedater) # makes clock trees
 library(skyspline) # infers population size
 library(phydynR) # fits complex population models
 library(diversitree) # fits 'mugration' models
-library(phyland) # fits island models
+#library(phyland) # fits island models
 library(adephylo) # provides distances to root
 # the following need to be installed separately
 # use setRepositories(ind=c(1,2)); install.packages(c("ggplot2","ggtree"))
@@ -118,9 +118,22 @@ The tip labels of the rooted tree are not in the same order as our original tree
 tree.td <- decdates[match(tre.rtt$tip.label,names(decdates))]
 ```
 
+
 ```{r}
 rdtd <- data.frame(RootDistance=tree.rd,SamplingTime=tree.td)
-ggplot(rdtd,aes(x=SamplingTime,y=RootDistance))+geom_point(color="blue",alpha=0.5)+geom_smooth(method="lm",se=FALSE,fullrange=TRUE,color="red")+scale_x_continuous(limits=c(2010,2016))+theme(legend.position = "none")
+p <- ggplot(rdtd,aes(x=SamplingTime,y=RootDistance))+geom_point(color="blue",alpha=0.5)+geom_smooth(method="lm",se=FALSE,fullrange=TRUE,color="red")+scale_x_continuous(limits=c(2010,2016))+theme(legend.position = "none")
+ggsave("mers_rtt.png",p,width=8,height=5,units="in")
+p
+```
+
+```{r}
+h <- rep("Camel",length(tre.rtt$tip.label))
+h[grep("human",tre.rtt$tip.label)] <- "Human"
+dd <- data.frame(taxa=tre.rtt$tip.label,Host=h)
+g1 <- ggtree(tre.rtt) %<+% dd
+p <- g1+theme_tree2()+geom_tippoint(aes(shape=Host, color=Host), alpha=1.0)+theme(legend.position="right")+scale_color_manual(values=c(c("Camel"="darkorange1","Human"="blue")))
+ggsave("mers_rtt_tre.png",p,width=8,height=5,units="in")
+p
 ```
 
 
@@ -182,11 +195,13 @@ Try changing the assumption about the infectious period in camels.
 We can colour the tree in by host type.
 
 ```{r}
-host <- rep("camel",length(tre2$tip.label))
-host[grep("human",tre2$tip.label)] <- "human"
-dd <- data.frame(taxa=tre2$tip.label,host=host)
+host <- rep("Camel",length(tre2$tip.label))
+host[grep("human",tre2$tip.label)] <- "Human"
+dd <- data.frame(taxa=tre2$tip.label,Host=host)
 g2 <- g %<+% dd
-g2+geom_tippoint(aes(shape=host, color=host), alpha=0.25)+theme(legend.position="right")
+p <- g2+geom_tippoint(aes(shape=Host, color=Host), alpha=1.0)+theme(legend.position="right")+scale_color_manual(values=c(c("Camel"="darkorange1","Human"="blue")))
+ggsave("mers_treedater.png",p,width=8,height=5,units="in")
+p
 ```
 
 ```{r}
@@ -196,10 +211,65 @@ g3 <- ggtree(tre3,aes(color=group),mrsd=date_decimal(max(decdates)))+theme_tree2
 g3
 ```
 
+### Migration rates via parsimony
+
+```{r}
+host.data <- matrix(c(substr(host,1,1)),dimnames=list(c(tre2$tip.label),NULL),nrow=length(tre2$tip.label),byrow=T)
+host.phydat <- phyDat(host.data,type="USER",levels=c("C","H"))
+```
+
+```{r}
+anc.fitch <- ancestral.pars(tre2,host.phydat,type="MPR",cost=NULL)
+```
+
+
+```{r}
+anc.sankoff.wrong <- ancestral.pars(tre2,host.phydat,type="MPR",cost=matrix(c(0,Inf,1,0),nrow=2,ncol=2))
+anc.sankoff.right <- ancestral.pars(tre2,host.phydat,type="MPR",cost=matrix(c(0,1,Inf,0),nrow=2,ncol=2))
+```
+
+Jumps in the wrong direction.
+
+```{r}
+sankoff(tre2,host.phydat,cost=matrix(c(0,Inf,1,0)))
+```
+
+```{r}
+sankoff(tre2,host.phydat,cost=matrix(c(0,1,Inf,0)))
+```
+
+```{r}
+p <- ggplot(data.frame(Direction=c("CamelToHuman","HumanToCamel"),Jumps=c(45,34)),aes(x=Direction,y=Jumps))+geom_bar(stat="identity")
+ggsave("mers_jumps.png",p,width=8,height=5,units="in")
+p
+```
+
+
+```{r}
+anc.sankoff.wrong.df <- data.frame(Camel=unname(unlist(lapply(anc.sankoff.wrong,"[",1))),Human=unname(unlist(lapply(anc.sankoff.wrong,"[",2))),node=names(anc.sankoff.wrong))
+anc.sankoff.right.df <- data.frame(Camel=unname(unlist(lapply(anc.sankoff.right,"[",1))),Human=unname(unlist(lapply(anc.sankoff.right,"[",2))),node=names(anc.sankoff.right))
+#anc.sankoff.wrong.df <- data.frame(Host=factor(unname(unlist(lapply(anc.sankoff.wrong,"[",1)))+1),node=names(anc.sankoff.wrong))
+```
+
+```{r}
+g4 <- g2
+pies <- nodepie(anc.sankoff.wrong.df,1:2,color=c("darkorange1","blue"),alpha=0.75)
+p <- inset(g4,pies)
+ggsave("mers_pies.png",p,width=8,height=5,units="in")
+```
+
+
+```{r}
+g4 <- g2
+pies <- nodepie(anc.sankoff.right.df,1:2,color=c("darkorange1","blue"),alpha=0.75)
+p <- inset(g4,pies)
+ggsave("mers_pies_right.png",p,width=8,height=5,units="in")
+```
+
 ### Migration rates the WRONG way
 
 ```{r}
-states <- as.integer(grepl("human",host))
+states <- as.integer(grepl("Human",host))
 names(states) <- tre2$tip.label
 head(states)
 ```
@@ -240,6 +310,12 @@ tre.mk2.fit <- find.mle(tre.mk2,c(0.1,0.1),root=ROOT.FLAT)
 tre.mk2.fit$par
 ```
 
+```{r}
+p <- ggplot(data.frame(Direction=c("CamelToHuman","HumanToCamel"),Rate=c(tre.mk2.fit$par[1],tre.mk2.fit$par[2])),aes(x=Direction,y=Rate))+geom_bar(stat="identity")
+ggsave("mers_rates.png",p,width=8,height=5,units="in")
+p
+```
+
 This might suggest that the rate of human to camel transmission is roughly the same as the rate from camel to human!
 
 The following gives the probability of the root state being either in a camel or a human.
@@ -251,6 +327,20 @@ mk2.root
 ```
 
 This is counter to our biological intuition, where we believe camels are the reservoir. Why is the model getting 'tricked'?
+
+```{r}
+mk2.anc <- as.data.frame(t(asr.marginal(tre.mk2,tre.mk2.fit$par)))
+mk2.anc$node <- as.character(seq(275,547))
+head(mk2.anc)
+```
+
+
+```{r}
+g4 <- g2
+pies <- nodepie(mk2.anc,1:2,color=c("darkorange1","blue"),alpha=0.75)
+p <- inset(g4,pies)+theme(legend.position="right")+scale_color_manual(values=c(c("V1"="darkorange1","V2"="blue")))
+ggsave("mers_pies_mk2.png",p,width=8,height=5,units="in")
+```
 
 ### Migration rates the correct way
 

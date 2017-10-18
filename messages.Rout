@@ -1,0 +1,22 @@
+Error in names(decdates) <- tipnames : object 'decdates' not found
+Error in head(decdates) : object 'decdates' not found
+Error in cor.test.default(y, x) : object 'decdates' not found
+Error in check.options(new, name.opt = ".X11.Options", envir = .X11env) : 
+  invalid argument name ‘eight’ in 'grDevices::png(..., res = dpi, units = "in")'
+Error in grep("human", tr2$tip.label) : object 'tr2' not found
+
+Error in grid.Call.graphics(L_setviewport, vp, TRUE) : 
+  non-finite location and/or size for viewport
+In addition: There were 50 or more warnings (use warnings() to see the first 50)
+Error in grid.Call.graphics(L_setviewport, vp, TRUE) : 
+  non-finite location and/or size for viewport
+Error in split.default(x = seq_len(nrow(x)), f = f, drop = drop, ...) : 
+  group length is 0 but data length > 0
+Error in grid.Call.graphics(L_setviewport, vp, TRUE) : 
+  non-finite location and/or size for viewport
+Error in grid.Call.graphics(L_setviewport, vp, TRUE) : 
+  non-finite location and/or size for viewport
+Error in grid.Call.graphics(L_setviewport, vp, TRUE) : 
+  non-finite location and/or size for viewport
+Error in grid.Call.graphics(L_setviewport, vp, TRUE) : 
+  non-finite location and/or size for viewport
